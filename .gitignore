@@ -3,3 +3,4 @@ venv/
 
 # Ignore environment variable files
 .env
+.gitignore
