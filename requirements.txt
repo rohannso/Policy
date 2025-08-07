@@ -7,3 +7,4 @@ langchain-qdrant
 langchain-groq
 qdrant-client
 pymupdf
+sentence-transformers
