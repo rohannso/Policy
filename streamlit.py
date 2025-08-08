@@ -31,6 +31,7 @@ st.set_page_config(
 )
 
 # --- Custom CSS for Professional Look ---
+# MODIFICATION: Updated CSS to support new chat elements
 st.markdown("""
 <style>
     .main-header {
@@ -42,63 +43,44 @@ st.markdown("""
         text-align: center;
     }
     
-    .chat-container {
-        background: #f8f9fa;
-        border-radius: 10px;
+    /* Making chat messages look nicer */
+    [data-testid="chat-message-container"] {
+        border-radius: 15px;
         padding: 1rem;
-        margin: 1rem 0;
-        border: 1px solid #e9ecef;
+        margin: 0.5rem 0;
     }
     
-    .user-message {
+    /* User message styling */
+    [data-testid="chat-message-container"]:has([data-testid="stChatMessageContent"] p) {
         background: #e3f2fd;
-        border-radius: 15px 15px 5px 15px;
-        padding: 1rem;
-        margin: 0.5rem 0;
-        border-left: 4px solid #2196f3;
+        border-left: 5px solid #2196f3;
     }
-    
-    .bot-message {
+
+    /* Bot message styling */
+    [data-testid="chat-message-container"]:has([data-testid="stChatMessageContent"] div[data-testid="stMarkdownContainer"]) {
         background: #f3e5f5;
-        border-radius: 15px 15px 15px 5px;
-        padding: 1rem;
-        margin: 0.5rem 0;
-        border-left: 4px solid #9c27b0;
+        border-left: 5px solid #9c27b0;
     }
-    
-    .status-success {
-        background: #d4edda;
-        border: 1px solid #c3e6cb;
-        color: #155724;
-        padding: 1rem;
-        border-radius: 5px;
-        margin: 1rem 0;
+
+    .st-emotion-cache-janbn0 {
+      color: black;
     }
-    
-    .status-error {
-        background: #f8d7da;
-        border: 1px solid #f5c6cb;
-        color: #721c24;
-        padding: 1rem;
-        border-radius: 5px;
-        margin: 1rem 0;
+
+    .st-emotion-cache-4oy321 {
+      color: black;
     }
+
 </style>
 """, unsafe_allow_html=True)
 
 # --- Initialize Session State ---
+# MODIFICATION: Changed chat_history to the more standard 'messages' for chat apps
 if 'rag_chain' not in st.session_state:
     st.session_state.rag_chain = None
-    
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
-    
-if 'embeddings' not in st.session_state:
-    st.session_state.embeddings = None
-    
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
 if 'pdf_processed' not in st.session_state:
     st.session_state.pdf_processed = False
-
 if 'current_pdf' not in st.session_state:
     st.session_state.current_pdf = None
 
@@ -124,40 +106,33 @@ def process_pdf(uploaded_file):
         return False
     
     try:
-        # Create progress bar
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        # Save uploaded file temporarily
         with open(f"temp_{uploaded_file.name}", "wb") as f:
             f.write(uploaded_file.read())
         
         status_text.text("📖 Loading PDF...")
-        progress_bar.progress(20)
+        progress_bar.progress(10)
         
-        # Load and process document
         loader = PyMuPDFLoader(f"temp_{uploaded_file.name}")
         docs = loader.load()
         
-        status_text.text("✂️ Splitting document...")
-        progress_bar.progress(40)
+        status_text.text("✂️ Splitting document into chunks...")
+        progress_bar.progress(30)
         
-        # Setup document splitting
         parent_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=150)
         child_splitter = RecursiveCharacterTextSplitter(chunk_size=300, chunk_overlap=30)
         
         status_text.text("🗄️ Setting up vector store...")
-        progress_bar.progress(60)
+        progress_bar.progress(50)
         
-        # Setup vector store
         client = QdrantClient(":memory:")
         collection_name = "pdf_chat_collection"
-        
         client.recreate_collection(
             collection_name=collection_name,
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
         )
-        
         vector_store = Qdrant(
             client=client,
             collection_name=collection_name,
@@ -165,9 +140,8 @@ def process_pdf(uploaded_file):
         )
         
         status_text.text("📚 Indexing document chunks...")
-        progress_bar.progress(80)
+        progress_bar.progress(70)
         
-        # Setup retriever
         docstore = InMemoryStore()
         retriever = ParentDocumentRetriever(
             vectorstore=vector_store,
@@ -178,9 +152,8 @@ def process_pdf(uploaded_file):
         retriever.add_documents(docs, ids=None)
         
         status_text.text("🤖 Initializing AI model...")
-        progress_bar.progress(95)
+        progress_bar.progress(90)
         
-        # Setup RAG chain
         llm = ChatGroq(model_name="llama3-8b-8192")
         
         prompt_template = """
@@ -202,7 +175,6 @@ def process_pdf(uploaded_file):
         question_answer_chain = create_stuff_documents_chain(llm, prompt)
         rag_chain = create_retrieval_chain(retriever, question_answer_chain)
         
-        # Update session state
         st.session_state.rag_chain = rag_chain
         st.session_state.pdf_processed = True
         st.session_state.current_pdf = uploaded_file.name
@@ -210,7 +182,6 @@ def process_pdf(uploaded_file):
         progress_bar.progress(100)
         status_text.text("✅ PDF processed successfully!")
         
-        # Cleanup temp file
         os.remove(f"temp_{uploaded_file.name}")
         
         time.sleep(1)
@@ -221,24 +192,13 @@ def process_pdf(uploaded_file):
         
     except Exception as e:
         st.error(f"❌ Error processing PDF: {e}")
-        # Cleanup temp file if it exists
         if os.path.exists(f"temp_{uploaded_file.name}"):
             os.remove(f"temp_{uploaded_file.name}")
         return False
 
-def get_response(query):
-    """Get response from RAG chain."""
-    if not st.session_state.rag_chain:
-        return "Please upload and process a PDF first."
-    
-    try:
-        response = st.session_state.rag_chain.invoke({"input": query})
-        return response["answer"]
-    except Exception as e:
-        return f"An error occurred: {e}"
+# MODIFICATION: Removed the synchronous get_response function. Streaming is handled directly in the UI.
 
 # --- Main Interface ---
-# Header
 st.markdown("""
 <div class="main-header">
     <h1>📚 AI-Powered PDF Chat Assistant</h1>
@@ -259,7 +219,6 @@ with st.sidebar:
     if uploaded_file is not None:
         st.write(f"**Selected file:** {uploaded_file.name}")
         
-        # Process button
         if st.button("🚀 Process PDF", type="primary", use_container_width=True):
             if process_pdf(uploaded_file):
                 st.success("✅ PDF processed successfully!")
@@ -269,29 +228,26 @@ with st.sidebar:
     
     st.divider()
     
-    # Clear chat button
     if st.button("🗑️ Clear Chat", use_container_width=True):
-        st.session_state.chat_history = []
+        st.session_state.messages = []
         st.rerun()
     
-    # Reset all button
     if st.button("🔄 Reset All", use_container_width=True):
         st.session_state.rag_chain = None
-        st.session_state.chat_history = []
+        st.session_state.messages = []
         st.session_state.pdf_processed = False
         st.session_state.current_pdf = None
         st.rerun()
     
     st.divider()
     
-    # Status information
     st.subheader("📊 Status")
     if st.session_state.pdf_processed:
         st.success(f"✅ Ready - {st.session_state.current_pdf}")
     else:
         st.warning("⏳ Upload a PDF to begin")
     
-    st.info(f"💬 Chat messages: {len(st.session_state.chat_history)}")
+    st.info(f"💬 Chat messages: {len(st.session_state.messages)}")
 
 # Main chat interface
 col1, col2 = st.columns([3, 1])
@@ -299,61 +255,47 @@ col1, col2 = st.columns([3, 1])
 with col1:
     st.header("💬 Chat Interface")
     
-    # Chat container
-    chat_container = st.container()
-    
-    with chat_container:
-        # Display chat history
-        for i, (user_msg, bot_msg) in enumerate(st.session_state.chat_history):
-            st.markdown(f"""
-            <div class="user-message">
-                <strong>🧑‍💼 You:</strong><br>
-                {user_msg}
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.markdown(f"""
-            <div class="bot-message">
-                <strong>🤖 Assistant:</strong><br>
-                {bot_msg}
-            </div>
-            """, unsafe_allow_html=True)
-    
-    # Input area
-    st.divider()
-    
-    with st.form("chat_form", clear_on_submit=True):
-        user_input = st.text_input(
-            "Ask a question about your document:",
-            placeholder="Type your question here...",
-            key="user_input"
-        )
-        
-        col_submit, col_space = st.columns([1, 3])
-        with col_submit:
-            submit_button = st.form_submit_button("Send 📤", type="primary")
-    
-    # Handle user input
-    if submit_button and user_input:
+    # MODIFICATION: Display existing chat messages from session state
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # MODIFICATION: Use st.chat_input for a better, more modern chat UI
+    if user_input := st.chat_input("Ask a question about your document..."):
         if not st.session_state.pdf_processed:
             st.warning("⚠️ Please upload and process a PDF first!")
         else:
-            # Add user message to history
-            with st.spinner("🤔 Thinking..."):
-                bot_response = get_response(user_input)
+            # Add user message to session state and display it
+            st.session_state.messages.append({"role": "user", "content": user_input})
+            with st.chat_message("user"):
+                st.markdown(user_input)
             
-            st.session_state.chat_history.append((user_input, bot_response))
-            st.rerun()
+            # Generate and stream the bot's response
+            with st.chat_message("assistant"):
+                # This is the core of the streaming implementation
+                def stream_generator():
+                    """A generator function that yields chunks of the 'answer' from the RAG chain stream."""
+                    try:
+                        for chunk in st.session_state.rag_chain.stream({"input": user_input}):
+                            if "answer" in chunk:
+                                yield chunk["answer"]
+                    except Exception as e:
+                        yield f"An error occurred: {e}"
+
+                # Use st.write_stream to display the streaming content
+                response = st.write_stream(stream_generator)
+
+            # Add the full bot response to the session state
+            st.session_state.messages.append({"role": "assistant", "content": response})
 
 with col2:
     st.header("ℹ️ Instructions")
-    
     st.markdown("""
     **How to use:**
     
     1. 📁 Upload a PDF file using the sidebar
     2. 🚀 Click "Process PDF" to analyze the document
-    3. 💬 Ask questions about the document content
+    3. 💬 Ask questions in the chat box at the bottom
     4. 🔄 Use "Reset All" to start over
     
     **Tips:**
@@ -361,7 +303,6 @@ with col2:
     - The AI will only answer based on the PDF content
     - Use "Clear Chat" to reset conversation history
     """)
-    
     st.info("🔑 Make sure you have GROQ_API_KEY in your .env file")
 
 # Footer
